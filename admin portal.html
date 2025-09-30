@@ -1,0 +1,492 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Portal</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons (Stable Version) -->
+    <script src="https://unpkg.com/lucide@latest/dist/lucide.min.js"></script>
+    <!-- API Integration -->
+    <script src="js/api.js?v=2"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fff7ed; /* Orange-50 to match student portal */
+            color: #1e293b; /* Slate 800 */
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="app"></div>
+
+    <script>
+        // --- ADMIN APPLICATION STATE ---
+        const state = {
+            isLoggedIn: false,
+            error: null,
+            successMessage: null,
+            loading: false,
+            user: null,
+            homework: [],
+            assignments: []
+        };
+
+        const app = document.getElementById('app');
+
+        // --- AUTHENTICATION ---
+        async function handleAdminLogin(username, password) {
+            state.error = null;
+            state.loading = true;
+            render();
+            
+            try {
+                const response = await API.login(username, password);
+                
+                // Check if user is admin
+                if (response.user.role !== 'admin') {
+                    throw new Error('Only administrators can access this portal');
+                }
+                
+                state.isLoggedIn = true;
+                state.user = response.user;
+                await loadAdminData();
+                navigate('home');
+            } catch (error) {
+                console.error('Login error:', error);
+                state.error = error.message || 'Login failed. Please try again.';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        async function handleLogout() {
+            state.loading = true;
+            render();
+            
+            try {
+                await API.logout();
+            } catch (error) {
+                console.error('Logout error:', error);
+            } finally {
+                state.isLoggedIn = false;
+                state.user = null;
+                state.error = null;
+                state.loading = false;
+                navigate('login');
+            }
+        }
+        
+        // --- ADMIN REGISTRATION ---
+        async function handleAdminRegistration(form) {
+            state.successMessage = null;
+            state.error = null;
+            state.loading = true;
+            render();
+
+            const formData = {
+                name: form.name.value,
+                username: form.username.value,
+                password: form.password.value,
+                department: form.department.value,
+                division: form.division.value
+            };
+
+            try {
+                const response = await API.registerAdmin(formData);
+                state.successMessage = 'Admin registered successfully!';
+                form.reset();
+            } catch (error) {
+                console.error('Error registering admin:', error);
+                state.error = error.message || 'Failed to register admin. Please try again.';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // --- DATA MANAGEMENT ---
+        async function handleUpload(type, form) {
+            state.successMessage = null;
+            state.error = null;
+            state.loading = true;
+            render();
+
+            const formData = {
+                subject: form.subject.value,
+                title: form.title.value,
+                description: form.description.value,
+                due_date: form.dueDate.value
+            };
+
+            try {
+                let response;
+                if (type === 'homework') {
+                    response = await API.createHomework(formData);
+                    state.successMessage = 'Homework uploaded successfully!';
+                } else if (type === 'assignment') {
+                    response = await API.createAssignment(formData);
+                    state.successMessage = 'Assignment uploaded successfully!';
+                }
+                
+                console.log(`Created ${type}:`, response);
+                
+                // Clear form
+                form.reset();
+            } catch (error) {
+                console.error(`Error creating ${type}:`, error);
+                state.error = error.message || `Failed to create ${type}. Please try again.`;
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // Load homework and assignments for admin dashboard
+        async function loadAdminData() {
+            try {
+                state.loading = true;
+                render();
+                const [homework, assignments] = await Promise.all([
+                    API.getHomework(),
+                    API.getAssignments()
+                ]);
+                state.homework = Array.isArray(homework) ? homework : [];
+                state.assignments = Array.isArray(assignments) ? assignments : [];
+                state.error = null;
+            } catch (err) {
+                console.error('Admin data load error:', err);
+                state.error = err.message || 'Failed to load admin data';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // Delete an item by type
+        async function handleDelete(type, id) {
+            try {
+                state.loading = true;
+                state.successMessage = null;
+                render();
+                if (type === 'homework') {
+                    await API.deleteHomework(id);
+                } else if (type === 'assignment') {
+                    await API.deleteAssignment(id);
+                }
+                state.successMessage = `${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully!`;
+                await loadAdminData();
+            } catch (error) {
+                console.error('Delete error:', error);
+                state.error = error.message || 'Failed to delete item';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+
+        // --- UI & NAVIGATION ---
+        const navigate = (page) => {
+            window.location.hash = page;
+            render();
+        };
+        const createIcon = (name, classes = 'w-5 h-5') => `<i data-lucide="${name}" class="${classes}"></i>`;
+        const illustrations = {
+            auth: `<svg width="100%" height="100%" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><g fill="none" fill-rule="evenodd"><path fill="#FFF7ED" d="M0 0h400v300H0z"/><path d="M216.49 101.378c18.52 1.543 31.33 13.43 31.33 31.256 0 20.3-16.48 36.79-36.79 36.79s-36.79-16.5-36.79-36.8c0-14.2 8.12-26.46 19.5-32.32m32.75-22.93c-3.12-1.8-6.6-2.8-10.26-2.8-19.1 0-34.58 15.5-34.58 34.6s15.47 34.6 34.58 34.6c17.93 0 32.75-13.68 34.34-31.26" stroke="#F97316" stroke-width="2"/><path d="M198.8 63.538c3.12 1.8 5.46 4.7 6.44 8.08.98 3.38.49 7.05-1.47 9.8l-1.95 2.72-13.17-9.43 1.95-2.73c2.93-4.1 8.3-5.58 12.4-4.1l-4.2-2.34M255.9 140.238l-23.4-16.7-3.4 4.74 23.42 16.72" stroke="#F97316" stroke-width="2"/><path d="M110 241.038v-56.12c0-4.95 4.02-8.97 8.97-8.97h162.06c4.95 0 8.97 4.02 8.97 8.97v56.12H110z" fill="#FFFFFF" stroke="#64748B" stroke-width="2"/><rect fill="#FFEDD5" x="115" y="180" width="168" height="56" rx="4"/><path d="M121 211.038h156m-156-12h156m-156-12h108" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/><path d="M241.97 151.038a16 16 0 01-31.94 0" stroke="#64748B" stroke-width="2"/><path d="M272 159.038l-10-8-10 8" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`
+        };
+
+        const createNavbar = (currentPage) => {
+            const navLinks = [
+                { page: 'home', label: 'Dashboard', icon: 'layout-dashboard' },
+                { page: 'register-admin', label: 'Add Admin', icon: 'user-plus' }
+            ];
+            
+            return `
+                <nav class="bg-white shadow-md sticky top-0 z-50">
+                    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div class="flex justify-between items-center h-16">
+                            <div class="flex items-center space-x-3">
+                                ${createIcon('shield-check', 'w-8 h-8 text-slate-700')}
+                                <span class="text-2xl font-bold text-slate-800">Admin Portal</span>
+                            </div>
+                            <div class="flex items-center space-x-4">
+                                <!-- Navigation Links -->
+                                <div class="hidden md:flex items-center space-x-2">
+                                    ${navLinks.map(link => `
+                                        <a href="#${link.page}" onclick="navigate('${link.page}')" class="flex items-center space-x-2 text-slate-600 px-3 py-2 rounded-lg transition-colors duration-200 hover:bg-slate-100 hover:text-slate-800 ${currentPage === link.page ? 'bg-slate-200 text-slate-900 font-semibold' : ''}">
+                                            ${createIcon(link.icon, 'w-4 h-4')}
+                                            <span>${link.label}</span>
+                                        </a>
+                                    `).join('')}
+                                </div>
+                                <button onclick="handleLogout()" class="bg-red-600 text-white font-bold px-4 py-2 rounded-lg transition-transform duration-200 hover:bg-red-700 active:scale-95 flex items-center space-x-2">
+                                    ${createIcon('log-out', 'w-5 h-5')}
+                                    <span>Logout</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            `;
+        };
+        
+        const createAdminRegistrationForm = () => {
+            return `
+                <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                    <h2 class="text-2xl font-bold text-slate-800 flex items-center space-x-3 mb-4">
+                        ${createIcon('user-plus', 'w-7 h-7')}
+                        <span>Register New Admin</span>
+                    </h2>
+                    <form id="admin-registration-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="admin-name">Full Name</label>
+                            <input id="admin-name" name="name" type="text" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="admin-username">Username</label>
+                            <input id="admin-username" name="username" type="text" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="admin-password">Password</label>
+                            <input id="admin-password" name="password" type="password" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1 text-slate-600" for="admin-department">Department</label>
+                                <input id="admin-department" name="department" type="text" placeholder="e.g. Administration" class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1 text-slate-600" for="admin-division">Division</label>
+                                <input id="admin-division" name="division" type="text" placeholder="e.g. Admin" class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                            </div>
+                        </div>
+                        <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-orange-600 text-white font-bold py-3 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                            ${state.loading ? 'Registering...' : 'Register Admin'}
+                        </button>
+                    </form>
+                </div>
+            `;
+        };
+
+        const createUploadForm = (type) => {
+            const title = type.charAt(0).toUpperCase() + type.slice(1);
+            const icon = type === 'homework' ? 'book-marked' : 'file-text';
+            return `
+                <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                    <h2 class="text-2xl font-bold text-slate-800 flex items-center space-x-3 mb-4">
+                        ${createIcon(icon, 'w-7 h-7')}
+                        <span>Upload New ${title}</span>
+                    </h2>
+                    <form id="${type}-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="${type}-subject">Subject</label>
+                            <input id="${type}-subject" name="subject" type="text" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="${type}-title">Title</label>
+                            <input id="${type}-title" name="title" type="text" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="${type}-description">Description</label>
+                            <textarea id="${type}-description" name="description" rows="3" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1 text-slate-600" for="${type}-dueDate">Due Date</label>
+                            <input id="${type}-dueDate" name="dueDate" type="date" required class="w-full p-2 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                        </div>
+                        <button type="submit" class="w-full bg-orange-600 text-white font-bold py-3 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95">
+                            Upload ${title}
+                        </button>
+                    </form>
+                </div>
+            `;
+        };
+
+        // --- PAGE RENDERING LOGIC ---
+        function render() {
+            const currentPage = window.location.hash.slice(1) || (state.isLoggedIn ? 'home' : 'login');
+            
+            let finalHtml = '';
+            if (state.isLoggedIn) {
+                finalHtml += createNavbar(currentPage);
+            }
+
+            let pageContent = '';
+            switch(currentPage) {
+                case 'login':
+                    pageContent = `<div class="min-h-screen w-full flex items-center justify-center bg-white">
+                        <div class="w-full max-w-4xl flex flex-col md:flex-row bg-white rounded-2xl shadow-xl m-4">
+                            <!-- Form Section -->
+                            <div class="w-full md:w-1/2 p-8">
+                                <div class="flex items-center space-x-2 mb-6">
+                                    ${createIcon('shield-check', 'w-8 h-8 text-slate-700')}
+                                    <h1 class="text-xl font-bold text-slate-700">Admin Portal</h1>
+                                </div>
+                                <h2 class="text-3xl font-bold text-slate-800 mb-2">Welcome, Admin!</h2>
+                                <p class="text-slate-500 mb-8">Please sign in to manage the portal.</p>
+                                <form id="login-form">
+                                    <div class="mb-4">
+                                        <label class="block text-sm font-medium mb-2 text-slate-600" for="username">Username</label>
+                                        <input id="username" type="text" value="admin" class="w-full p-3 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                    </div>
+                                    <div class="mb-6">
+                                        <label class="block text-sm font-medium mb-2 text-slate-600" for="password">Password</label>
+                                        <input id="password" type="password" value="admin123" class="w-full p-3 bg-slate-100 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                    </div>
+                                    ${state.error ? `<p class="text-red-500 text-sm mb-4">${state.error}</p>` : ''}
+                        <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-orange-600 text-white font-bold py-3 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                            ${state.loading ? 'Logging in...' : 'Login'}
+                        </button>
+                                </form>
+                            </div>
+                            <!-- Illustration Section -->
+<div class="hidden md:flex w-1/2 items-center justify-center p-8 bg-orange-50 rounded-r-2xl">
+                                <div class="w-full max-w-xs">
+                                    ${illustrations.auth}
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                // --- PROTECTED PAGES ---
+                default:
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    switch(currentPage) {
+                        case 'home':
+                            pageContent = `<main class="max-w-7xl mx-auto p-4 md:p-8">
+                                <h1 class="text-4xl font-bold text-slate-800 mb-6">Admin Dashboard</h1>
+                                ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                                ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                                ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Processing request...</p></div>` : ''}
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    ${createUploadForm('homework')}
+                                    ${createUploadForm('assignment')}
+                                </div>
+
+                                <div class="mt-8 flex items-center justify-between">
+                                    <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">${createIcon('folder-cog','w-6 h-6 text-slate-700')}<span>Manage Items</span></h2>
+                                    <button onclick="loadAdminData()" class="inline-flex items-center space-x-2 px-3 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800">
+                                        ${createIcon('refresh-cw','w-4 h-4')}<span>Refresh</span>
+                                    </button>
+                                </div>
+
+                                <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    <!-- Manage Homework -->
+                                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h3 class="text-lg font-bold text-slate-800 flex items-center space-x-2">${createIcon('book-marked','w-5 h-5')}<span>Homework</span></h3>
+                                        </div>
+                                        <div class="divide-y divide-slate-100">
+                                            ${
+                                                (state.homework || []).slice().sort((a,b)=>b.id-a.id).slice(0,20).map(h=>`
+                                                    <div class="py-3 flex items-start justify-between">
+                                                        <div class="mr-3">
+                                                            <div class="font-semibold text-slate-800">${h.title}</div>
+                                                            <div class="text-sm text-slate-500">${h.subject} • Due ${new Date(h.due_date || h.dueDate).toLocaleDateString()}</div>
+                                                        </div>
+                                                        <button onclick="handleDelete('homework', ${h.id})" class="inline-flex items-center space-x-1 px-2 py-1 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">${createIcon('trash-2','w-4 h-4')}<span>Delete</span></button>
+                                                    </div>
+                                                `).join('') || '<div class="text-slate-500">No homework found.</div>'
+                                            }
+                                        </div>
+                                    </div>
+                                    <!-- Manage Assignments -->
+                                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h3 class="text-lg font-bold text-slate-800 flex items-center space-x-2">${createIcon('file-text','w-5 h-5')}<span>Assignments</span></h3>
+                                        </div>
+                                        <div class="divide-y divide-slate-100">
+                                            ${
+                                                (state.assignments || []).slice().sort((a,b)=>b.id-a.id).slice(0,20).map(a=>`
+                                                    <div class="py-3 flex items-start justify-between">
+                                                        <div class="mr-3">
+                                                            <div class="font-semibold text-slate-800">${a.title}</div>
+                                                            <div class="text-sm text-slate-500">${a.subject} • Due ${new Date(a.due_date || a.dueDate).toLocaleDateString()}</div>
+                                                        </div>
+                                                        <button onclick="handleDelete('assignment', ${a.id})" class="inline-flex items-center space-x-1 px-2 py-1 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">${createIcon('trash-2','w-4 h-4')}<span>Delete</span></button>
+                                                    </div>
+                                                `).join('') || '<div class="text-slate-500">No assignments found.</div>'
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </main>`;
+                            break;
+                        case 'register-admin':
+                            pageContent = `<main class="max-w-4xl mx-auto p-4 md:p-8">
+                                <h1 class="text-4xl font-bold text-slate-800 mb-6">Register New Admin</h1>
+                                ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                                ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                                ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Processing request...</p></div>` : ''}
+                                <div class="max-w-2xl mx-auto">
+                                    ${createAdminRegistrationForm()}
+                                </div>
+                            </main>`;
+                            break;
+                        default:
+                            pageContent = `<div class="p-8 text-center"><p>Page not found. Redirecting...</p></div>`;
+                            setTimeout(() => navigate('home'), 1000);
+                            break;
+                    }
+            }
+            
+            finalHtml += pageContent;
+            app.innerHTML = finalHtml;
+            if (window.lucide) lucide.createIcons();
+
+            // Add event listeners for forms AFTER they have been rendered
+            if (currentPage === 'login') {
+                document.getElementById('login-form')?.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const username = document.getElementById('username').value;
+                    const password = document.getElementById('password').value;
+                    handleAdminLogin(username, password);
+                });
+            } else if (currentPage === 'home') {
+                document.getElementById('homework-form')?.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    handleUpload('homework', e.target);
+                });
+                 document.getElementById('assignment-form')?.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    handleUpload('assignment', e.target);
+                });
+            } else if (currentPage === 'register-admin') {
+                document.getElementById('admin-registration-form')?.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    handleAdminRegistration(e.target);
+                });
+            }
+        }
+
+        // --- INITIALIZATION ---
+        async function initialize() {
+            // Check if user is already authenticated
+            if (TokenManager.isValid()) {
+                const user = UserManager.get();
+                if (user && user.role === 'admin') {
+                    state.isLoggedIn = true;
+                    state.user = user;
+                    await loadAdminData();
+                }
+            }
+            render();
+        }
+
+        window.addEventListener('hashchange', render);
+        window.addEventListener('load', initialize);
+
+    </script>
+</body>
+</html>
