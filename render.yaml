@@ -14,8 +14,4 @@ services:
       - key: JWT_EXPIRES_IN
         value: 24h
       - key: DB_PATH
-        value: /data/student_portal.db
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
+        value: /tmp/student_portal.db # free tier has no persistent disk; data resets on restarts
