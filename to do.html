@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons (Stable Version) -->
+    <script src="https://unpkg.com/lucide@latest/dist/lucide.min.js"></script>
+    <!-- API Integration -->
+    <script src="js/api.js?v=2"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fff7ed; /* Orange-50 */
+            color: #1e293b; /* Slate 800 */
+        }
+        /* Custom scrollbar for a more modern look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e2e8f0;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="app"></div>
+
+    <script>
+        // --- APPLICATION STATE ---
+        const state = {
+            user: null,
+            homework: [],
+            assignments: [],
+            isLoggedIn: false,
+            loading: false,
+            error: null,
+            successMessage: null,
+            // Calendar state (month: 0-11)
+            calendarYear: new Date().getFullYear(),
+            calendarMonth: new Date().getMonth()
+        };
+
+        const app = document.getElementById('app');
+
+        // --- AUTHENTICATION ---
+        async function handleLogin(username, password) {
+            state.error = null;
+            state.loading = true;
+            render();
+            
+            try {
+                const response = await API.login(username, password);
+                
+                // Check if user is student
+                if (response.user.role !== 'student') {
+                    throw new Error('Only students can access this portal');
+                }
+                
+                state.isLoggedIn = true;
+                state.user = response.user;
+                await loadData();
+                navigate('home');
+            } catch (error) {
+                console.error('Login error:', error);
+                state.error = error.message || 'Login failed. Please try again.';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        async function handleLogout() {
+            state.loading = true;
+            render();
+            
+            try {
+                await API.logout();
+            } catch (error) {
+                console.error('Logout error:', error);
+            } finally {
+                state.isLoggedIn = false;
+                state.user = null;
+                state.homework = [];
+                state.assignments = [];
+                state.error = null;
+                state.loading = false;
+                navigate('login');
+            }
+        }
+
+        // --- DATA LOADING ---
+        async function loadData() {
+            if (!state.isLoggedIn) return;
+            
+            try {
+                const [homework, assignments] = await Promise.all([
+                    API.getHomework(),
+                    API.getAssignments()
+                ]);
+                
+                state.homework = homework || [];
+                state.assignments = assignments || [];
+            } catch (error) {
+                console.error('Error loading data:', error);
+                state.error = 'Failed to load data. Please refresh the page.';
+            }
+        }
+
+        // --- TASK STATUS UPDATE ---
+        async function updateTaskStatus(type, id, newStatus) {
+            try {
+                state.loading = true;
+                state.error = null; // Clear any previous errors
+                state.successMessage = null; // Clear any previous success messages
+                render();
+                
+                if (type === 'homework') {
+                    await API.updateHomework(id, { status: newStatus });
+                    // Update local state
+                    const task = state.homework.find(h => h.id === id);
+                    if (task) task.status = newStatus;
+                } else {
+                    await API.updateAssignment(id, { status: newStatus });
+                    // Update local state
+                    const task = state.assignments.find(a => a.id === id);
+                    if (task) task.status = newStatus;
+                }
+                
+                state.successMessage = `${type.charAt(0).toUpperCase() + type.slice(1)} status updated to ${newStatus}!`;
+                setTimeout(() => {
+                    state.successMessage = null;
+                    render();
+                }, 3000);
+            } catch (error) {
+                console.error(`Error updating ${type} status:`, error);
+                state.error = error.message || `Failed to update ${type} status.`;
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // --- PROFILE MANAGEMENT ---
+        async function handleProfileUpdate(form) {
+            state.error = null;
+            state.successMessage = null;
+            state.loading = true;
+            render();
+
+            const formData = new FormData(form);
+            const profileData = {
+                name: formData.get('name'),
+                department: formData.get('department'),
+                division: formData.get('division'),
+                semester: formData.get('semester'),
+                emergency_contact_name: formData.get('emergency_contact_name'),
+                emergency_contact_relationship: formData.get('emergency_contact_relationship'),
+                emergency_contact_phone: formData.get('emergency_contact_phone')
+            };
+
+            // Client-side validation
+            const errors = [];
+            
+            if (profileData.name && profileData.name.trim()) {
+                if (profileData.name.trim().length < 2 || profileData.name.trim().length > 100) {
+                    errors.push('Name must be between 2 and 100 characters');
+                }
+                if (!/^[a-zA-Z\s]+$/.test(profileData.name.trim())) {
+                    errors.push('Name can only contain letters and spaces');
+                }
+            }
+            
+            if (profileData.emergency_contact_name && profileData.emergency_contact_name.trim()) {
+                if (!/^[a-zA-Z\s]+$/.test(profileData.emergency_contact_name.trim())) {
+                    errors.push('Emergency contact name can only contain letters and spaces');
+                }
+            }
+            
+            if (profileData.emergency_contact_phone && profileData.emergency_contact_phone.trim()) {
+                if (!/^[\+]?[1-9][\d]{0,15}$/.test(profileData.emergency_contact_phone.trim())) {
+                    errors.push('Please enter a valid phone number (e.g., +1234567890 or 1234567890)');
+                }
+            }
+            
+            if (errors.length > 0) {
+                state.error = errors.join('. ');
+                state.loading = false;
+                render();
+                return;
+            }
+
+            try {
+                await API.updateProfile(profileData);
+                
+                // Update local user data only with non-empty values
+                Object.keys(profileData).forEach(key => {
+                    if (profileData[key] && profileData[key].trim() !== '') {
+                        state.user[key] = profileData[key].trim();
+                    }
+                });
+                UserManager.set(state.user);
+                
+                state.successMessage = 'Profile updated successfully!';
+                setTimeout(() => {
+                    state.successMessage = null;
+                    render();
+                }, 3000);
+            } catch (error) {
+                console.error('Profile update error:', error);
+                if (error.message.includes('details')) {
+                    // Handle validation errors from server
+                    try {
+                        const errorData = JSON.parse(error.message.split('details: ')[1]);
+                        state.error = errorData.map(err => err.msg).join('. ');
+                    } catch {
+                        state.error = error.message || 'Failed to update profile. Please try again.';
+                    }
+                } else {
+                    state.error = error.message || 'Failed to update profile. Please try again.';
+                }
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        async function handlePasswordChange(form) {
+            state.error = null;
+            state.successMessage = null;
+            state.loading = true;
+            render();
+
+            const formData = new FormData(form);
+            const currentPassword = formData.get('currentPassword');
+            const newPassword = formData.get('newPassword');
+            const confirmPassword = formData.get('confirmPassword');
+
+            // Client-side validation
+            const errors = [];
+            
+            if (!currentPassword || currentPassword.trim() === '') {
+                errors.push('Current password is required');
+            }
+            
+            if (!newPassword || newPassword === '') {
+                errors.push('New password is required');
+            } else if (newPassword.length < 6) {
+                errors.push('New password must be at least 6 characters long');
+            } else if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+                errors.push('New password must contain at least one uppercase letter, one lowercase letter, and one number');
+            }
+            
+            if (!confirmPassword || confirmPassword === '') {
+                errors.push('Please confirm your new password');
+            } else if (newPassword !== confirmPassword) {
+                errors.push('New passwords do not match');
+            }
+            
+            if (errors.length > 0) {
+                state.error = errors.join('. ');
+                state.loading = false;
+                render();
+                return;
+            }
+
+            try {
+                await API.changePassword(currentPassword, newPassword);
+                state.successMessage = 'Password changed successfully!';
+                form.reset();
+            } catch (error) {
+                console.error('Password change error:', error);
+                state.error = error.message || 'Failed to change password. Please try again.';
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // --- STUDENT REGISTRATION ---
+        async function handleStudentRegistration(form) {
+            state.error = null;
+            state.loading = true;
+            render();
+
+            const formData = new FormData(form);
+            const registrationData = {
+                name: formData.get('name'),
+                username: formData.get('username'),
+                password: formData.get('password'),
+                confirmPassword: formData.get('confirmPassword')
+            };
+
+            // Client-side validation
+            const errors = [];
+            
+            if (!registrationData.name || registrationData.name.trim() === '') {
+                errors.push('Full name is required');
+            } else if (registrationData.name.trim().length < 2 || registrationData.name.trim().length > 100) {
+                errors.push('Name must be between 2 and 100 characters');
+            } else if (!/^[a-zA-Z\s]+$/.test(registrationData.name.trim())) {
+                errors.push('Name can only contain letters and spaces');
+            }
+            
+            if (!registrationData.username || registrationData.username.trim() === '') {
+                errors.push('Username is required');
+            } else if (registrationData.username.trim().length < 3 || registrationData.username.trim().length > 50) {
+                errors.push('Username must be between 3 and 50 characters');
+            } else if (!/^[a-zA-Z0-9_]+$/.test(registrationData.username.trim())) {
+                errors.push('Username can only contain letters, numbers, and underscores');
+            }
+            
+            if (!registrationData.password || registrationData.password === '') {
+                errors.push('Password is required');
+            } else if (registrationData.password.length < 6) {
+                errors.push('Password must be at least 6 characters long');
+            } else if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(registrationData.password)) {
+                errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
+            }
+            
+            if (!registrationData.confirmPassword || registrationData.confirmPassword === '') {
+                errors.push('Please confirm your password');
+            } else if (registrationData.password !== registrationData.confirmPassword) {
+                errors.push('Passwords do not match');
+            }
+            
+            if (errors.length > 0) {
+                state.error = errors.join('. ');
+                state.loading = false;
+                render();
+                return;
+            }
+
+            try {
+                const response = await API.registerStudent(registrationData);
+                state.successMessage = 'Registration successful! You can now login with your credentials.';
+                setTimeout(() => {
+                    navigate('login');
+                }, 2000);
+            } catch (error) {
+                console.error('Registration error:', error);
+                if (error.message.includes('details')) {
+                    // Handle validation errors from server
+                    try {
+                        const errorData = JSON.parse(error.message.split('details: ')[1]);
+                        state.error = errorData.map(err => err.msg).join('. ');
+                    } catch {
+                        state.error = error.message || 'Registration failed. Please try again.';
+                    }
+                } else {
+                    state.error = error.message || 'Registration failed. Please try again.';
+                }
+            } finally {
+                state.loading = false;
+                render();
+            }
+        }
+
+        // --- UTILITY FUNCTIONS ---
+        const getGreeting = () => {
+            const hour = new Date().getHours();
+            if (hour < 12) return { text: 'Good Morning', icon: 'sunrise' };
+            if (hour < 18) return { text: 'Good Afternoon', icon: 'sun' };
+            return { text: 'Good Evening', icon: 'moon-star' };
+        };
+
+        const formatDate = (dateString) => {
+            const options = { year: 'numeric', month: 'long', day: 'numeric' };
+            return new Date(dateString).toLocaleDateString(undefined, options);
+        };
+        
+        const getRelativeDate = (dateString) => {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const dueDate = new Date(dateString);
+            const diffTime = dueDate.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays < 0) return 'Overdue';
+            if (diffDays === 0) return 'Due Today';
+            if (diffDays === 1) return 'Due Tomorrow';
+            return `Due in ${diffDays} days`;
+        };
+        
+        const getStatusBadge = (status) => {
+            switch (status) {
+                case 'Completed': return `<span class="px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full">Completed</span>`;
+                case 'Pending': return `<span class="px-2 py-1 text-xs font-medium text-yellow-700 bg-yellow-100 rounded-full">Pending</span>`;
+                default: return `<span class="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded-full">${status}</span>`;
+            }
+        };
+
+        const getSubjectIcon = (subject) => {
+            const icons = {
+                'Math': 'calculator',
+                'Science': 'flask-conical',
+                'History': 'scroll-text',
+                'English': 'pilcrow-square',
+            };
+            const iconName = icons[subject] || 'book-open';
+            return createIcon(iconName, 'w-4 h-4');
+        };
+
+        // ---- Calendar helpers ----
+        const monthNames = [
+            'January','February','March','April','May','June','July','August','September','October','November','December'
+        ];
+
+        const parseDue = (val) => {
+            if (!val) return null;
+            // Normalize to local midnight to avoid TZ shifts
+            const s = typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val) ? `${val}T00:00:00` : val;
+            const d = new Date(s);
+            return isNaN(d.getTime()) ? null : d;
+        };
+
+        function startOfMonth(y, m){ return new Date(y, m, 1); }
+        function endOfMonth(y, m){ return new Date(y, m + 1, 0); }
+
+        function buildCalendarDays(year, month) {
+            const first = startOfMonth(year, month);
+            const last = endOfMonth(year, month);
+            const firstWeekday = first.getDay(); // 0=Sun
+            const totalDays = last.getDate();
+
+            // Determine the date to start the grid (Sunday of the first week row)
+            const startDate = new Date(year, month, 1 - firstWeekday);
+
+            // Build 6 weeks x 7 days = 42 cells (covers all cases)
+            const days = [];
+            for (let i = 0; i < 42; i++) {
+                const d = new Date(startDate);
+                d.setDate(startDate.getDate() + i);
+                const inCurrent = d.getMonth() === month;
+                days.push({ date: d, inCurrent });
+            }
+            return days;
+        }
+
+        function getTasksForDate(d) {
+            const y = d.getFullYear();
+            const m = d.getMonth();
+            const day = d.getDate();
+            const items = [];
+            // Homework first
+            for (const t of (state.homework || [])) {
+                const due = parseDue(t.due_date || t.dueDate);
+                if (!due) continue;
+                if (due.getFullYear() === y && due.getMonth() === m && due.getDate() === day) {
+                    items.push({ ...t, __type: 'homework' });
+                }
+            }
+            // Assignments
+            for (const t of (state.assignments || [])) {
+                const due = parseDue(t.due_date || t.dueDate);
+                if (!due) continue;
+                if (due.getFullYear() === y && due.getMonth() === m && due.getDate() === day) {
+                    items.push({ ...t, __type: 'assignment' });
+                }
+            }
+            // Sort by title for stable display
+            return items.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+        }
+
+        function prevMonth() {
+            let m = state.calendarMonth - 1;
+            let y = state.calendarYear;
+            if (m < 0) { m = 11; y--; }
+            state.calendarMonth = m;
+            state.calendarYear = y;
+            render();
+        }
+        function nextMonth() {
+            let m = state.calendarMonth + 1;
+            let y = state.calendarYear;
+            if (m > 11) { m = 0; y++; }
+            state.calendarMonth = m;
+            state.calendarYear = y;
+            render();
+        }
+
+        // --- NAVIGATION ---
+        const navigate = (page) => {
+            window.location.hash = page;
+            render();
+        };
+
+        // --- PASSWORD VISIBILITY TOGGLE ---
+        const togglePasswordVisibility = (inputId) => {
+            const passwordInput = document.getElementById(inputId);
+            const eyeIcon = document.getElementById(`${inputId}-eye-icon`);
+            const eyeSlashIcon = document.getElementById(`${inputId}-eye-slash-icon`);
+
+            if (passwordInput && passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                eyeIcon.classList.add('hidden');
+                eyeSlashIcon.classList.remove('hidden');
+            } else if (passwordInput) {
+                passwordInput.type = 'password';
+                eyeIcon.classList.remove('hidden');
+                eyeSlashIcon.classList.add('hidden');
+            }
+        };
+
+        // --- UI COMPONENTS ---
+        const createIcon = (name, classes = 'w-5 h-5') => `<i data-lucide="${name}" class="${classes}"></i>`;
+        
+        const illustrations = {
+            auth: `<svg width="100%" height="100%" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><g fill="none" fill-rule="evenodd"><path fill="#FFF7ED" d="M0 0h400v300H0z"/><path d="M216.49 101.378c18.52 1.543 31.33 13.43 31.33 31.256 0 20.3-16.48 36.79-36.79 36.79s-36.79-16.5-36.79-36.8c0-14.2 8.12-26.46 19.5-32.32m32.75-22.93c-3.12-1.8-6.6-2.8-10.26-2.8-19.1 0-34.58 15.5-34.58 34.6s15.47 34.6 34.58 34.6c17.93 0 32.75-13.68 34.34-31.26" stroke="#F97316" stroke-width="2"/><path d="M198.8 63.538c3.12 1.8 5.46 4.7 6.44 8.08.98 3.38.49 7.05-1.47 9.8l-1.95 2.72-13.17-9.43 1.95-2.73c2.93-4.1 8.3-5.58 12.4-4.1l-4.2-2.34M255.9 140.238l-23.4-16.7-3.4 4.74 23.42 16.72" stroke="#F97316" stroke-width="2"/><path d="M110 241.038v-56.12c0-4.95 4.02-8.97 8.97-8.97h162.06c4.95 0 8.97 4.02 8.97 8.97v56.12H110z" fill="#FFFFFF" stroke="#64748B" stroke-width="2"/><rect fill="#FFEDD5" x="115" y="180" width="168" height="56" rx="4"/><path d="M121 211.038h156m-156-12h156m-156-12h108" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/><path d="M241.97 151.038a16 16 0 01-31.94 0" stroke="#64748B" stroke-width="2"/><path d="M272 159.038l-10-8-10 8" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`,
+            allCaughtUp: `<svg viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg"><g fill="none" fill-rule="evenodd"><path fill="#F8FAFC" d="M0 0h200v150H0z"/><path d="M72.5 80.5l19 19 38-38" stroke="#34D399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M165 61.5c0 29.82-24.18 54-54 54s-54-24.18-54-54c0-29.15 23.07-52.9 52-53.94" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/><path d="M141.24 31.76l5.66 5.65-14.14 14.15-5.66-5.66M125.5 28.5l-5.66 5.66-14.14-14.14 5.66-5.66" stroke="#E2E8F0" stroke-width="2" stroke-linecap="round"/></g></svg>`,
+            notFound: `<svg viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg"><g fill="none" fill-rule="evenodd"><path fill="#F8FAFC" d="M0 0h200v150H0z"/><circle stroke="#CBD5E1" stroke-width="2" cx="123" cy="62" r="23"/><path d="M140.97 79.97l11.31 11.31" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round"/><path d="M68 121h64a4 4 0 004-4v-5a4 4 0 00-4-4H68a4 4 0 00-4 4v5a4 4 0 004 4z" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2"/><path d="M56 111V53a4 4 0 014-4h86a4 4 0 014 4v58" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/><path d="M100 49v-8a4 4 0 014-4h18" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/><path d="M72 73h32m-32 16h24" stroke="#E2E8F0" stroke-width="2" stroke-linecap="round"/></g></svg>`
+        };
+
+        const createNavbar = (currentPage) => {
+            const navLinks = [
+                { page: 'home', label: 'Home', icon: 'layout-dashboard' },
+                { page: 'homework', label: 'Homework', icon: 'book-marked' },
+                { page: 'assignments', label: 'Assignments', icon: 'file-text' },
+                { page: 'schedule', label: 'Schedule', icon: 'calendar-days' },
+                { page: 'profile', label: 'Profile', icon: 'user-circle' },
+            ];
+
+            return `
+                <nav class="bg-white/80 backdrop-blur-lg p-4 shadow-md sticky top-0 z-50 border-b border-slate-200">
+                    <div class="max-w-6xl mx-auto flex justify-between items-center">
+                        <div class="flex items-center space-x-2">
+                            ${createIcon('graduation-cap', 'w-8 h-8 text-slate-800')}
+                            <span class="text-slate-800 text-2xl font-bold">Student Portal</span>
+                        </div>
+                        
+                        <!-- Desktop Navigation -->
+                        <div class="hidden md:flex items-center space-x-2">
+                             ${navLinks.map(link => `
+                                        <a href="#${link.page}" onclick="navigate('${link.page}')" class="flex items-center space-x-2 text-slate-600 px-3 py-2 rounded-lg transition-colors duration-200 hover:bg-amber-100 hover:text-slate-800 ${currentPage === link.page ? 'bg-amber-100 text-slate-900 font-semibold' : ''}">
+                                    ${createIcon(link.icon, 'w-5 h-5')}
+                                    <span>${link.label}</span>
+                                </a>
+                            `).join('')}
+                        </div>
+
+                        <!-- Mobile Menu Button -->
+                        <div class="md:hidden">
+                           <button onclick="document.querySelector('#mobile-menu').classList.toggle('hidden')" class="text-slate-600 focus:outline-none p-2 rounded-md hover:bg-slate-200">
+                                ${createIcon('menu', 'w-6 h-6')}
+                           </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Mobile Menu -->
+                     <div id="mobile-menu" class="hidden md:hidden mt-4 space-y-2">
+                        ${navLinks.map(link => `
+                            <a href="#${link.page}" onclick="navigate('${link.page}')" class="flex items-center space-x-3 text-slate-600 px-4 py-3 rounded-lg transition-colors duration-200 hover:bg-slate-200 hover:text-slate-800 ${currentPage === link.page ? 'bg-slate-200 text-slate-900 font-semibold' : ''}">
+                                ${createIcon(link.icon, 'w-5 h-5')}
+                                <span>${link.label}</span>
+                            </a>
+                        `).join('')}
+                    </div>
+                </nav>
+            `;
+        };
+
+        const createTaskCard = (item, type) => {
+            const dueDate = item.due_date || item.dueDate; // Handle both API format and local format
+            const isCompleted = item.status === 'Completed';
+            const isPending = item.status === 'Pending';
+            
+            return `
+            <div class="bg-white rounded-xl shadow-md p-6 border border-slate-200 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-lg font-bold text-slate-800">${item.title}</h3>
+                    <div class="flex items-center space-x-2">
+                        ${getStatusBadge(item.status)}
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 text-sm font-medium text-orange-600 mb-3">
+                    ${getSubjectIcon(item.subject)}
+                    <span>${item.subject}</span>
+                </div>
+                <p class="text-slate-600 text-sm mb-4">${item.description}</p>
+                <div class="flex items-center justify-between text-sm text-slate-500 border-t pt-3 mt-3 mb-4">
+                    <div class="flex items-center space-x-2">
+                       ${createIcon('calendar-clock', 'w-4 h-4')}
+                       <span>${formatDate(dueDate)}</span>
+                    </div>
+                    <span class="font-semibold">${getRelativeDate(dueDate)}</span>
+                </div>
+            </div>
+        `;
+        };
+
+        const createEmptyState = (message, illustration) => `
+            <div class="text-center bg-white p-8 rounded-xl shadow-md border border-slate-200 flex flex-col items-center justify-center h-full">
+                <div class="w-48 h-auto">${illustration}</div>
+                <p class="mt-4 text-slate-500 font-medium">${message}</p>
+            </div>
+        `;
+
+        // --- PAGE RENDERING LOGIC ---
+        const render = () => {
+            const currentPage = window.location.hash.slice(1) || (state.isLoggedIn ? 'home' : 'login');
+            
+            let pageContent = ''; // This will hold the main content from the switch
+            const showNavbar = state.isLoggedIn && !['login', 'register'].includes(currentPage);
+            
+            // Build the entire page's HTML as a string first
+            let finalHtml = '';
+            if (showNavbar) {
+                finalHtml += createNavbar(currentPage);
+            }
+
+            switch(currentPage) {
+                // --- AUTH PAGES ---
+                case 'login':
+                case 'register':
+                    if (state.isLoggedIn) {
+                        navigate('home');
+                        return;
+                    }
+                    const isLogin = currentPage === 'login';
+                    const formTitle = isLogin ? 'Welcome Back!' : 'Create Account';
+                    const formSubtitle = isLogin ? 'Please login to access your portal.' : 'Join the student community today.';
+                    const buttonText = isLogin ? 'Login' : 'Register';
+                    const switchPrompt = isLogin ? "Don't have an account?" : "Already have an account?";
+                    const switchLinkText = isLogin ? "Register here" : "Login here";
+                    const switchLinkPage = isLogin ? "register" : "login";
+
+                    pageContent = `
+                        <div class="min-h-screen w-full flex items-center justify-center bg-white">
+                             <div class="w-full max-w-4xl flex flex-col md:flex-row bg-white rounded-2xl shadow-xl m-4 border border-amber-200">
+                                <!-- Form Section -->
+                                <div class="w-full md:w-1/2 p-8">
+                                    <div class="flex items-center space-x-2 mb-6">
+                                        ${createIcon('graduation-cap', 'w-8 h-8 text-slate-700')}
+                                        <h1 class="text-xl font-bold text-slate-700">Student Portal</h1>
+                                    </div>
+                                    <h2 class="text-3xl font-bold text-slate-800 mb-2">${formTitle}</h2>
+                                    <p class="text-slate-500 mb-8">${formSubtitle}</p>
+                                    <form id="auth-form">
+                                        ${!isLogin ? `
+                                        <div class="mb-4">
+                                            <label class="block text-sm font-medium mb-2 text-slate-600" for="fullname">Full Name</label>
+                                            <input id="fullname" name="name" type="text" placeholder="Enter your full name (letters and spaces only)" required class="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+                                        </div>` : ''}
+                                        <div class="mb-4">
+                                            <label class="block text-sm font-medium mb-2 text-slate-600" for="username">Username/ID</label>
+                                                <input id="username" name="username" type="text" placeholder="${isLogin ? 'Enter your username or ID' : 'Choose a username (letters, numbers, underscores only)'}" value="${isLogin ? 'student' : ''}" required class="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition">
+                                        </div>
+                                        <div class="mb-4">
+                                            <label class="block text-sm font-medium mb-2 text-slate-600" for="password">Password</label>
+                                            <div class="relative">
+                                                <input id="password" name="password" type="password" placeholder="${isLogin ? 'Enter your password' : 'At least 6 chars with upper, lower & number'}" value="${isLogin ? 'password123' : ''}" required class="w-full p-3 pr-10 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition">
+                                                <button type="button" onclick="togglePasswordVisibility('password')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-sky-600 focus:outline-none">
+                                                    <i id="password-eye-icon" data-lucide="eye" class="h-5 w-5"></i><i id="password-eye-slash-icon" data-lucide="eye-off" class="h-5 w-5 hidden"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                         ${!isLogin ? `
+                                        <div class="mb-6">
+                                            <label class="block text-sm font-medium mb-2 text-slate-600" for="confirm-password">Confirm Password</label>
+                                            <div class="relative">
+                                                <input id="confirm-password" name="confirmPassword" type="password" placeholder="Confirm your password" required class="w-full p-3 pr-10 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition">
+                                                <button type="button" onclick="togglePasswordVisibility('confirm-password')" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-sky-600 focus:outline-none">
+                                                    <i id="confirm-password-eye-icon" data-lucide="eye" class="h-5 w-5"></i><i id="confirm-password-eye-slash-icon" data-lucide="eye-off" class="h-5 w-5 hidden"></i>
+                                                </button>
+                                            </div>
+                                        </div>` : '<div class="mb-6"></div>'}
+                                        ${state.error ? `<p class="text-red-500 text-sm mb-4">${state.error}</p>` : ''}
+                                        <button type="submit" ${state.loading ? 'disabled' : ''} class="w-full bg-orange-600 text-white font-bold py-3 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                                            ${state.loading ? (isLogin ? 'Logging in...' : 'Registering...') : buttonText}
+                                        </button>
+                                    </form>
+                                    <p class="text-center mt-6 text-sm text-slate-600">
+                                        ${switchPrompt}
+                                        <a href="#${switchLinkPage}" onclick="navigate('${switchLinkPage}')" class="text-sky-600 hover:underline font-medium">${switchLinkText}</a>
+                                    </p>
+                                    ${isLogin ? `
+                                    <div class="text-center mt-4">
+                                        <p class="text-xs text-slate-500 mb-2">Are you an administrator?</p>
+                                        <a href="/admin" class="inline-flex items-center space-x-2 px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors duration-200">
+                                            ${createIcon('shield-check', 'w-4 h-4')}
+                                            <span>Go to Admin Portal</span>
+                                        </a>
+                                    </div>` : ''}
+                                </div>
+                                <!-- Illustration Section -->
+<div class="hidden md:flex w-1/2 items-center justify-center p-8 bg-orange-100 rounded-r-2xl">
+                                    <div class="w-full max-w-xs">
+                                        ${illustrations.auth}
+                                    </div>
+                                </div>
+                             </div>
+                        </div>
+                    `;
+                    break;
+
+                // --- MAIN PAGES ---
+                case 'home':
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    const pendingHomework = state.homework.filter(h => h.status === 'Pending').slice(0, 2);
+                    const pendingAssignments = state.assignments.filter(a => a.status === 'Pending').slice(0, 2);
+                    const greeting = getGreeting();
+                    pageContent = `
+                        <main class="max-w-6xl mx-auto p-4 md:p-8">
+                            <!-- Header -->
+                            <div class="mb-8 flex items-center space-x-4">
+                                ${createIcon(greeting.icon, 'w-12 h-12 text-sky-500')}
+                                <div>
+                                    <h1 class="text-4xl font-bold text-slate-800">${greeting.text}, ${state.user.name}!</h1>
+                                    <p class="text-slate-500 mt-1">${new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                                </div>
+                            </div>
+                            <!-- Messages -->
+                            ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                            ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                            ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Loading...</p></div>` : ''}
+
+                            <!-- Main Content Grid -->
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <!-- Upcoming Homework -->
+                                <div>
+                                    <div class="flex justify-between items-center mb-4">
+                                        <div class="flex items-center space-x-3">
+                                            ${createIcon('book-marked', 'w-7 h-7 text-slate-700')}
+                                            <h2 class="text-2xl font-bold text-slate-800">Upcoming Homework</h2>
+                                        </div>
+                                        <a href="#homework" onclick="navigate('homework')" class="text-orange-600 hover:underline font-medium text-sm flex items-center space-x-1"><span>View All</span> ${createIcon('arrow-right', 'w-4 h-4')}</a>
+                                    </div>
+                                <div class="space-y-6">
+                                        ${pendingHomework.length > 0 ? pendingHomework.map(item => createTaskCard(item, 'homework')).join('') : createEmptyState('No pending homework. Great job!', illustrations.allCaughtUp)}
+                                    </div>
+                                </div>
+                                <!-- Upcoming Assignments -->
+                                <div>
+                                    <div class="flex justify-between items-center mb-4">
+                                        <div class="flex items-center space-x-3">
+                                            ${createIcon('file-text', 'w-7 h-7 text-slate-700')}
+                                            <h2 class="text-2xl font-bold text-slate-800">Upcoming Assignments</h2>
+                                        </div>
+                                        <a href="#assignments" onclick="navigate('assignments')" class="text-orange-600 hover:underline font-medium text-sm flex items-center space-x-1"><span>View All</span> ${createIcon('arrow-right', 'w-4 h-4')}</a>
+                                    </div>
+                                    <div class="space-y-6">
+                                        ${pendingAssignments.length > 0 ? pendingAssignments.map(item => createTaskCard(item, 'assignment')).join('') : createEmptyState("You're all caught up on assignments!", illustrations.allCaughtUp)}
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
+                    `;
+                    break;
+                case 'homework':
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    pageContent = `
+                        <main class="max-w-6xl mx-auto p-4 md:p-8">
+                             <div class="flex items-center space-x-3 mb-6">
+                                ${createIcon('book-marked', 'w-8 h-8 text-slate-800')}
+                                <h1 class="text-3xl font-bold text-slate-800">All Homework</h1>
+                             </div>
+                             <!-- Messages -->
+                             ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                             ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                             ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Updating...</p></div>` : ''}
+                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${state.homework.map(item => createTaskCard(item, 'homework')).join('')}
+                             </div>
+                        </main>
+                    `;
+                    break;
+                case 'assignments':
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    pageContent = `
+                        <main class="max-w-6xl mx-auto p-4 md:p-8">
+                            <div class="flex items-center space-x-3 mb-6">
+                                ${createIcon('file-text', 'w-8 h-8 text-slate-800')}
+                                <h1 class="text-3xl font-bold text-slate-800">All Assignments</h1>
+                             </div>
+                             <!-- Messages -->
+                             ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                             ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                             ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Updating...</p></div>` : ''}
+                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                ${state.assignments.map(item => createTaskCard(item, 'assignment')).join('')}
+                             </div>
+                        </main>
+                    `;
+                    break;
+                case 'schedule':
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    const wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                    const y = state.calendarYear;
+                    const m = state.calendarMonth;
+                    const daysGrid = buildCalendarDays(y, m);
+                    pageContent = `
+                        <main class="max-w-6xl mx-auto p-4 md:p-8">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center space-x-3">
+                                    ${createIcon('calendar-days', 'w-8 h-8 text-slate-800')}
+                                    <h1 class="text-3xl font-bold text-slate-800">Schedule</h1>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <button onclick="prevMonth()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 flex items-center space-x-2">${createIcon('chevron-left','w-4 h-4')}<span>Prev</span></button>
+                                    <div class="px-3 py-2 rounded-lg text-slate-700 font-semibold">${monthNames[m]} ${y}</div>
+                                    <button onclick="nextMonth()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 flex items-center space-x-2"><span>Next</span>${createIcon('chevron-right','w-4 h-4')}</button>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-4 md:p-6 rounded-xl shadow-md border border-slate-200">
+                                <div class="grid grid-cols-7 gap-2 text-center font-semibold text-sm text-slate-500 mb-2">
+                                    ${wd.map(d => `<div>${d}</div>`).join('')}
+                                </div>
+                                <div class="grid grid-cols-7 gap-2">
+                                    ${daysGrid.map(cell => {
+                                        const d = cell.date.getDate();
+                                        const inMonth = cell.inCurrent;
+                                        const tasks = getTasksForDate(cell.date);
+                                        const dayClasses = `${inMonth ? 'bg-white' : 'bg-slate-50'} border border-slate-200 rounded-lg p-2 h-32 flex flex-col`;
+                                        const chip = (t) => {
+                                            // Different colors by type: homework vs assignment
+                                            const color = t.__type === 'homework'
+                                                ? 'bg-indigo-100 text-indigo-700'
+                                                : 'bg-emerald-100 text-emerald-700';
+                                            return `<div class=\"text-xs p-1 rounded ${color} truncate\" title=\"${t.title}\">${t.title}</div>`;
+                                        };
+                                        return `
+                                            <div class="${dayClasses}">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="font-bold text-sm ${inMonth ? 'text-slate-700' : 'text-slate-400'}">${d}</span>
+                                                </div>
+                                                <div class="mt-1 space-y-1 overflow-auto">
+                                                    ${tasks.map(chip).join('')}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        </main>
+                    `;
+                    break;
+                case 'profile':
+                    if (!state.isLoggedIn) {
+                        navigate('login');
+                        return;
+                    }
+                    pageContent = `
+                        <main class="max-w-6xl mx-auto p-4 md:p-8">
+                            <div class="flex items-center space-x-3 mb-6">
+                                ${createIcon('user-cog', 'w-8 h-8 text-slate-800')}
+                                <h1 class="text-3xl font-bold text-slate-800">Profile & Settings</h1>
+                            </div>
+                            <!-- Messages -->
+                            ${state.successMessage ? `<div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-md" role="alert"><p>${state.successMessage}</p></div>` : ''}
+                            ${state.error ? `<div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert"><p>${state.error}</p></div>` : ''}
+                            ${state.loading ? `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-md" role="alert"><p>Processing...</p></div>` : ''}
+                             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                 <!-- Profile Card -->
+                                 <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-md border border-slate-200 text-center">
+                                    <img src="${state.user.avatar_url || 'https://placehold.co/256x256/E0F2FE/0891B2?text='+state.user.name.charAt(0).toUpperCase()}" alt="User Avatar" class="w-32 h-32 rounded-full mx-auto mb-4 ring-4 ring-slate-200">
+                                    <h2 class="text-2xl font-bold text-slate-800">${state.user.name}</h2>
+                                    <div class="flex items-center justify-center space-x-2 text-slate-500 mt-1">
+                                        ${createIcon('badge-info', 'w-4 h-4')}
+                                        <p>${state.user.student_id || 'Student ID: ' + state.user.id}</p>
+                                    </div>
+                                    <div class="mt-2 text-sm text-slate-600">
+                                        <p>${state.user.department || 'No department'} - ${state.user.division || 'No division'}</p>
+                                        <p>Semester: ${state.user.semester || 'Not specified'}</p>
+                                    </div>
+                                    <button onclick="handleLogout()" class="mt-6 w-full flex items-center justify-center space-x-2 bg-red-500 text-white font-bold py-3 rounded-lg transition-transform duration-200 hover:bg-red-600 active:scale-95">
+                                        ${createIcon('log-out', 'w-5 h-5')}
+                                        <span>Logout</span>
+                                    </button>
+                                 </div>
+                                 <!-- Settings Forms -->
+                                 <div class="lg:col-span-2 space-y-8">
+                                    <!-- Academic Details -->
+                                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                                        <div class="flex items-center space-x-3 mb-4">
+                                            ${createIcon('school', 'w-6 h-6 text-slate-700')}
+                                            <h3 class="text-xl font-bold text-slate-800">Academic Details</h3>
+                                        </div>
+                                        <form id="profile-form" class="space-y-4">
+                                            <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('user', 'w-4 h-4')}
+                                                    <span>Full Name</span>
+                                                </label>
+                                                <input id="profile-name" name="name" type="text" value="${state.user.name}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                            <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('building-2', 'w-4 h-4')}
+                                                    <span>Department</span>
+                                                </label>
+                                                <input id="profile-department" name="department" type="text" value="${state.user.department || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                             <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('users', 'w-4 h-4')}
+                                                    <span>Division</span>
+                                                </label>
+                                                <input id="profile-division" name="division" type="text" value="${state.user.division || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                             <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('graduation-cap', 'w-4 h-4')}
+                                                    <span>Semester</span>
+                                                </label>
+                                                <input id="profile-semester" name="semester" type="text" value="${state.user.semester || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                        ${createIcon('user-check', 'w-4 h-4')}
+                                                        <span>Emergency Contact</span>
+                                                    </label>
+                                                    <input id="profile-emergency-name" name="emergency_contact_name" type="text" value="${state.user.emergency_contact_name || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                                </div>
+                                                <div>
+                                                    <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                        ${createIcon('heart', 'w-4 h-4')}
+                                                        <span>Relationship</span>
+                                                    </label>
+                                                    <input id="profile-emergency-relationship" name="emergency_contact_relationship" type="text" value="${state.user.emergency_contact_relationship || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('phone', 'w-4 h-4')}
+                                                    <span>Emergency Contact Phone</span>
+                                                </label>
+                                                <input id="profile-emergency-phone" name="emergency_contact_phone" type="tel" placeholder="e.g., +1234567890 or 1234567890" value="${state.user.emergency_contact_phone || ''}" class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+                                            </div>
+                                            <button type="submit" class="bg-orange-600 text-white font-bold py-2 px-6 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95">Save Changes</button>
+                                        </form>
+                                    </div>
+                                    <!-- Change Password -->
+                                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                                        <div class="flex items-center space-x-3 mb-4">
+                                            ${createIcon('shield-check', 'w-6 h-6 text-slate-700')}
+                                            <h3 class="text-xl font-bold text-slate-800">Change Password</h3>
+                                        </div>
+                                        <form id="password-form" class="space-y-4">
+                                            <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('lock', 'w-4 h-4')}
+                                                    <span>Current Password</span>
+                                                </label>
+                                                <input id="current-password" name="currentPassword" type="password" required class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                             <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('key-round', 'w-4 h-4')}
+                                                    <span>New Password</span>
+                                                </label>
+                                                <input id="new-password" name="newPassword" type="password" required class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                            <div>
+                                                <label class="flex items-center space-x-2 text-sm font-medium mb-1 text-slate-600">
+                                                    ${createIcon('key-round', 'w-4 h-4')}
+                                                    <span>Confirm New Password</span>
+                                                </label>
+                                                <input id="confirm-new-password" name="confirmPassword" type="password" required class="w-full p-2 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                            </div>
+                                            <button type="submit" class="bg-orange-600 text-white font-bold py-2 px-6 rounded-lg transition-transform duration-200 hover:bg-orange-700 active:scale-95">Update Password</button>
+                                        </form>
+                                    </div>
+                                 </div>
+                             </div>
+                        </main>
+                    `;
+                    break;
+                // --- DEFAULT / 404 ---
+                default:
+                    pageContent = `
+                        <div class="min-h-screen flex items-center justify-center text-center px-4 bg-gradient-to-br from-sky-50 to-sky-100">
+                            <div>
+                                <div class="w-64 h-auto mx-auto">${illustrations.notFound}</div>
+                                <h1 class="text-3xl font-extrabold text-slate-800 mt-6 mb-2">Page Not Found</h1>
+                                <p class="text-slate-500 mb-6">Oops! The page you are looking for does not exist or has been moved.</p>
+                                <a href="#home" onclick="navigate('home')" class="bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition-transform duration-200 hover:bg-sky-700 active:scale-95 inline-flex items-center space-x-2">
+                                    ${createIcon('arrow-left', 'w-5 h-5')}
+                                    <span>Go to Dashboard</span>
+                                </a>
+                            </div>
+                        </div>
+                    `;
+            }
+
+            finalHtml += pageContent;
+
+            // Now, update the DOM once with the complete HTML
+            app.innerHTML = finalHtml;
+            
+            // Finally, process the new DOM content to render the icons
+            // Check if lucide is available before calling it, making the app more robust
+            if (window.lucide) {
+                lucide.createIcons(); 
+            }
+            
+            // Add event listeners for forms AFTER they have been rendered
+            if (currentPage === 'login' || currentPage === 'register') {
+                document.getElementById('auth-form')?.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    
+                    if (currentPage === 'login') {
+                        const username = document.getElementById('username').value;
+                        const password = document.getElementById('password').value;
+                        await handleLogin(username, password);
+                    } else {
+                        await handleStudentRegistration(e.target);
+                    }
+                });
+            } else if (currentPage === 'profile') {
+                // Profile form event listeners
+                document.getElementById('profile-form')?.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await handleProfileUpdate(e.target);
+                });
+                
+                document.getElementById('password-form')?.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await handlePasswordChange(e.target);
+                });
+            }
+        };
+
+        // --- INITIALIZATION ---
+        async function initialize() {
+            // Check if user is already authenticated
+            if (TokenManager.isValid()) {
+                const user = UserManager.get();
+                if (user && user.role === 'student') {
+                    state.isLoggedIn = true;
+                    state.user = user;
+                    await loadData();
+                }
+            }
+            render();
+        }
+
+        window.addEventListener('hashchange', render);
+        window.addEventListener('load', initialize);
+
+    </script>
+</body>
+</html>
