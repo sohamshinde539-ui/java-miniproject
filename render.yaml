@@ -5,7 +5,7 @@ services:
     env: node
     plan: free
     autoDeploy: true
-    buildCommand: ""
+    buildCommand: npm ci --omit=dev
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:
