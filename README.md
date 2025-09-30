@@ -285,6 +285,11 @@ Check the server console for detailed error logs and API request information.
 
 This project is for educational purposes. Feel free to use and modify as needed.
 
+## Developers
+
+1. Mr. Soham Sushant Shinde
+2. Mr. Deepak Yadav
+
 ---
 
 🚀 **Happy coding!** If you encounter any issues, check the troubleshooting section or create an issue in the repository.
