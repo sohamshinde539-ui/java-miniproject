@@ -128,16 +128,26 @@ const gracefulShutdown = (signal) => {
 // Start server
 async function startServer() {
     try {
+        // Ensure database schema and default users exist (idempotent)
+        try {
+            const initializeDatabase = require('./scripts/initDatabase');
+            await initializeDatabase();
+            console.log('Database initialized (tables and defaults ensured)');
+        } catch (e) {
+            console.warn('Initialization script failed or not executed:', e.message);
+        }
+
         await db.connect();
         console.log('Database connected successfully');
 
         serverInstance = app.listen(PORT, () => {
-            console.log(`🚀 Server running on http://localhost:${PORT}`);
-            console.log(`📚 Student Portal: http://localhost:${PORT}/student`);
-            console.log(`🔧 Admin Portal: http://localhost:${PORT}/admin`);
-            console.log(`❤️  API Health: http://localhost:${PORT}/api/health`);
+            const base = process.env.NODE_ENV === 'production' ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'your-host'}` : `http://localhost:${PORT}`;
+            console.log(`🚀 Server running on ${base.replace(/\/$/, '')}`);
+            console.log(`📚 Student Portal: ${base}/student`);
+            console.log(`🔧 Admin Portal: ${base}/admin`);
+            console.log(`❤️  API Health: ${base}/api/health`);
             console.log('');
-            console.log('Default credentials:');
+            console.log('Default credentials (only if not already created):');
             console.log('👨‍🎓 Student - Username: student, Password: password123');
             console.log('👨‍💼 Admin - Username: admin, Password: admin123');
         });
